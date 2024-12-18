@@ -1,0 +1,150 @@
+--@name really cool chair
+--@author Xandertron
+--@server
+
+--
+--    Made by Xandertron - STEAM_0:1:42942061 - github.com/Xandertron
+--    flying chair :)
+--
+
+--config:
+local startSpeed = 10
+local maxSpeed = 50
+local shieldEnabled = true
+local shieldMaxHealth = 300
+local noclipEnabled = false
+local destroyDelay = 10 --in seconds how long to keep the chair alive until respawning it after a player leaves it
+--
+
+local chip = chip()
+
+local seat
+local seatPhysObj
+local function recreateSeat()
+    seat = prop.createSent(chip:getPos() + chip:getUp() * 20, Angle(), "Chair_Plastic", true)
+    seat:setMaterial("debug/debugtranslucentsinglecolor")
+    seat:setCollisionGroup(COLLISION_GROUP.PASSABLE_DOOR)
+    seatPhysObj = seat:getPhysicsObject()
+end
+try(recreateSeat)
+
+local shield
+local shieldPhys
+function recreateShield()
+    if shieldEnabled then
+        shield = prop.create(chip:getPos() + chip:getUp() * 40, Angle(), "models/hunter/misc/shell2x2.mdl", true)
+        shield:setMaterial("models/debug/debugwhite")
+        shield:setColor(Color(255,255,255,120))
+        shield:setNocollideAll(true)
+        shieldPhysObj = shield:getPhysicsObject()
+        if seat and seat:isValid() then
+            shield:setParent(seat)
+            shield:setPos(Vector(0,0,20))
+        end
+    end
+end
+try(recreateShield)
+
+function respawn()
+    if seat:isValid() then
+        seat:remove()
+    end
+    if shield:isValid() then
+        shield:remove()
+    end
+    shieldHealth = shieldMaxHealth
+    try(recreateSeat)
+    try(recreateShield)
+end
+
+local shieldHealth = shieldMaxHealth
+local speed = startSpeed
+
+hook.add("EntityTakeDamage","shieldDamage",function(target, attacker, inflictor, amount)
+    --TODO: maybe use position and force from this hook to accelerate the ball in another direction
+    if target == shield then
+        shieldHealth = shieldHealth - amount
+        if shieldHealth <= 0 then
+            respawn()
+        else
+            shield:setColor(Color(255,255,255,(shieldHealth / shieldMaxHealth) * 150))
+        end
+    end
+end)
+
+hook.add("playerEnteredVehicle","setDriver",function(ply, vehicle)
+    if vehicle == seat then
+        print(ply:getName() .. " entered the seat")
+        timer.remove("delete")
+        seat:setAngles(Angle(0,0,0))
+        seat:setFrozen(true)
+        enableHud(ply, true)
+        printHud(ply, "WASD to move, jump to go up, crouch to go down")
+    end
+end)
+
+hook.add("playerLeaveVehicle","setDriver",function(ply, vehicle)
+    if vehicle == seat then
+        print(ply:getName() .. " left the seat")
+        if seat:isValid() and seat:isValidPhys() then
+            seat:setFrozen(false)
+            seatPhysObj:wake()
+        end
+        if destroyDelay >= 1 then
+            timer.create("delete", destroyDelay, 0, function() respawn() end)
+        end
+    end
+end)
+
+hook.add("tick", "main", function()
+     if not seat:isValid() then
+        try(recreateSeat)
+    elseif not shield:isValid() then
+        try(recreateShield)
+    else
+        if seat:isValid() and seat:isValidPhys() then
+            seat:setColor(Color((timer.curtime()*30)%360,1,1):hsvToRGB())
+        end
+        if seat:getDriver():isValid() then
+            local driver = seat:getDriver()
+            
+            local w = driver:keyDown(IN_KEY.FORWARD)
+            local a = driver:keyDown(IN_KEY.MOVELEFT)
+            local s = driver:keyDown(IN_KEY.BACK)
+            local d = driver:keyDown(IN_KEY.MOVERIGHT)
+            
+            local jump = driver:keyDown(IN_KEY.JUMP)
+            local crouch = driver:keyDown(IN_KEY.DUCK)
+            local run = driver:keyDown(IN_KEY.SPEED)
+            
+            if w or a or s or d or jump or crouch then
+                local w = w and 1 or 0
+                local a = a and 1 or 0
+                local s = s and 1 or 0
+                local d = d and 1 or 0
+                
+                local jump = jump and 1 or 0
+                local crouch = crouch and 1 or 0
+                local run = run and 2 or 1
+                
+                local eye = driver:getEyeAngles()
+                
+                speed = math.clamp(speed + 1, startSpeed, maxSpeed) * run
+                
+                local pos = seat:getPos() + 
+                    (eye:getForward() * speed * (w - s)) + 
+                    (eye:getRight() * speed * (d - a)) + 
+                    (eye:getUp() * speed * (jump - crouch))
+                
+                if not noclipEnabled and not pos:isInWorld() then return end
+                
+                if seatPhysObj then
+                    seatPhysObj:wake()
+                    seatPhysObj:setPos(pos)
+                end
+            else
+                speed = startSpeed
+            end
+        end
+    end
+end)
